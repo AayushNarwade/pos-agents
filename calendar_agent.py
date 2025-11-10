@@ -94,4 +94,6 @@ def create_event():
 
 # ----------------- MAIN -----------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=PORT)
+    port = int(os.getenv("PORT", 10002))  # dynamically use Render’s port
+    app.run(host="0.0.0.0", port=port)
+
