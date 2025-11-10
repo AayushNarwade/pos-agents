@@ -139,5 +139,5 @@ def create_draft():
 
 # ---------------- Entry Point ----------------
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10003))
+    port = int(os.environ.get("PORT", 5000))  # Render dynamically injects $PORT
     app.run(host="0.0.0.0", port=port)

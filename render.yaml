@@ -33,7 +33,7 @@ services:
       - key: PORT
         value: "10002"
 
-  # ------------------ Email Agent ------------------
+    # ------------------ Email Agent ------------------
   - type: web
     name: email-agent
     env: python
@@ -54,5 +54,3 @@ services:
         sync: false
       - key: SENDER_EMAIL
         value: pos-agent@mvp.com
-      - key: PORT
-        value: "10003"
