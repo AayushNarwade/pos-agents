@@ -22,7 +22,7 @@ IST = pytz.timezone("Asia/Kolkata")
 service = None
 try:
     if not os.path.exists(GOOGLE_CREDENTIALS_PATH):
-        raise FileNotFoundError(f"Credentials file not found at {GOOGLE_CREDENTIALS_PATH}")
+        raise FileNotFoundError(f"❌ Credentials file not found at {GOOGLE_CREDENTIALS_PATH}")
 
     creds = service_account.Credentials.from_service_account_file(
         GOOGLE_CREDENTIALS_PATH, scopes=SCOPES
@@ -59,7 +59,7 @@ def create_event():
         if not start_time:
             return jsonify({"error": "start_time is required"}), 400
 
-        # Convert to datetime and set default duration
+        # Convert to datetime and set default duration (30 mins)
         start = datetime.fromisoformat(start_time)
         if not end_time:
             end = start + timedelta(minutes=30)
@@ -90,5 +90,7 @@ def create_event():
 
 # ----------------- MAIN -----------------
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10002))  # dynamically adapt to Render port
+    # Use dynamic Render port if present, fallback to 10002 locally
+    port = int(os.getenv("PORT", 10002))
+    print(f"🚀 Starting Calendar Agent on port {port}")
     app.run(host="0.0.0.0", port=port)
