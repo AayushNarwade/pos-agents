@@ -1,20 +1,20 @@
-# Python / Virtual Environment
-.venv/
+# Virtual environments
 venv/
+.venv/
+
+# Bytecode & cache
 __pycache__/
 *.pyc
-
-# IDE / OS files
-.DS_Store
-.idea/
-
-# Environment files
-.env  
-
-# Byte-compiled / cache
 *.pyo
 *.pyd
 
-# Logs
-*.log
+# Secrets & env
+.env
+*.json
+google_service_key.json
+plasma-crossbar-444405-q6-e72a3a1af12b.json
 
+# OS / IDE
+.DS_Store
+.idea/
+*.log
