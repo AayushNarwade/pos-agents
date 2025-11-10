@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: pos-xp-agent
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python xp_agent.py
+    envVars:
+      - key: NOTION_API_KEY
+        sync: false
+      - key: NOTION_TASK_DATABASE_ID
+        sync: false
+      - key: NOTION_XP_LEDGER_ID
+        sync: false
+      - key: XP_AGENT_PORT
+        value: 10001
