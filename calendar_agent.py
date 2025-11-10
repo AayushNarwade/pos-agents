@@ -21,33 +21,22 @@ PORT = int(os.getenv("PORT", 10002))
 IST = pytz.timezone("Asia/Kolkata")
 
 # ----------------- AUTH -----------------
+
 service = None
 try:
-    creds = None
-
-    # Option 1: If GOOGLE_CREDENTIALS_JSON is provided (Render)
     creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
+
     if creds_json:
-        creds_data = json.loads(creds_json)
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as temp_file:
-            json.dump(creds_data, temp_file)
-            temp_file_path = temp_file.name
-        creds = service_account.Credentials.from_service_account_file(
-            temp_file_path, scopes=SCOPES
-        )
-
-    # Option 2: Local file testing
-    elif GOOGLE_CREDENTIALS_PATH:
-        creds = service_account.Credentials.from_service_account_file(
-            GOOGLE_CREDENTIALS_PATH, scopes=SCOPES
-        )
-
-    if creds:
-        service = build("calendar", "v3", credentials=creds)
-        print("✅ Google Calendar Agent authenticated successfully.")
+        import json
+        creds_info = json.loads(creds_json)
+        creds = service_account.Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+    elif GOOGLE_CREDENTIALS_PATH and os.path.exists(GOOGLE_CREDENTIALS_PATH):
+        creds = service_account.Credentials.from_service_account_file(GOOGLE_CREDENTIALS_PATH, scopes=SCOPES)
     else:
-        print("⚠️ No credentials found. Calendar service not initialized.")
+        raise Exception("No Google credentials found (JSON or file).")
 
+    service = build("calendar", "v3", credentials=creds)
+    print("✅ Google Calendar Agent authenticated successfully.")
 except Exception as e:
     print("❌ Google Auth Error:", e)
     service = None
