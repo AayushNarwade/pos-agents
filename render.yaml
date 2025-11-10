@@ -1,16 +1,28 @@
 services:
   - type: web
-    name: pos-xp-agent
+    name: xp-agent
     env: python
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: python xp_agent.py
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python xp_agent.py"
     envVars:
+      - key: PORT
+        value: 10001
       - key: NOTION_API_KEY
         sync: false
-      - key: NOTION_TASK_DATABASE_ID
+      - key: XP_LEDGER_DB_ID
         sync: false
-      - key: NOTION_XP_LEDGER_ID
+
+  - type: web
+    name: calendar-agent
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python calendar_agent.py"
+    envVars:
+      - key: PORT
+        value: 10002
+      - key: GOOGLE_CALENDAR_ID
         sync: false
-      - key: XP_AGENT_PORT
-        value: 10001
+      - key: GOOGLE_CREDENTIALS_JSON
+        sync: false
