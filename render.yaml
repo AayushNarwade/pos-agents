@@ -4,8 +4,9 @@ services:
     name: xp-agent
     env: python
     plan: free
+    region: singapore
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn xp_agent:app
+    startCommand: gunicorn -w 2 -b 0.0.0.0:$PORT xp_agent:app
     envVars:
       - key: NOTION_API_KEY
         sync: false
@@ -21,8 +22,9 @@ services:
     name: calendar-agent
     env: python
     plan: free
+    region: singapore
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn calendar_agent:app
+    startCommand: gunicorn -w 2 -b 0.0.0.0:$PORT calendar_agent:app
     envVars:
       - key: GOOGLE_CREDENTIALS_JSON
         sync: false
@@ -30,3 +32,27 @@ services:
         sync: false
       - key: PORT
         value: "10002"
+
+  # ------------------ Email Agent ------------------
+  - type: web
+    name: email-agent
+    env: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn -w 2 -b 0.0.0.0:$PORT email_agent:app
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: MAILTRAP_HOST
+        value: sandbox.smtp.mailtrap.io
+      - key: MAILTRAP_PORT
+        value: "587"
+      - key: MAILTRAP_USER
+        sync: false
+      - key: MAILTRAP_PASS
+        sync: false
+      - key: SENDER_EMAIL
+        value: pos-agent@mvp.com
+      - key: PORT
+        value: "10003"
