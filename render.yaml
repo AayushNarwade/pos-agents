@@ -28,7 +28,7 @@ services:
     plan: free
     region: singapore
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn -w 2 -b 0.0.0.0:$PORT calendar_agent:app
+    startCommand: gunicorn -w 1 -b 0.0.0.0:$PORT calendar_agent:app
     envVars:
       - key: GOOGLE_CALENDAR_ID
         value: "aayushnarwade10@gmail.com"
@@ -39,6 +39,7 @@ services:
     secretFiles:
       - name: google_service_key.json
         path: /etc/secrets/google_service_key.json
+
 
 
 
