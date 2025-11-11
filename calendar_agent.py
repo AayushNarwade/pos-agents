@@ -39,29 +39,31 @@ def parse_message_with_ai(message: str):
     Returns structured JSON.
     """
     system_prompt = """
-    You are an intelligent event parser. 
-    Given a meeting request in natural language, extract:
+    You are an intelligent event parser that always outputs pure JSON.
+    Given a meeting request in natural language, extract and return only:
     {
         "title": "<title>",
-        "start_time": "<ISO datetime format, IST timezone>",
-        "end_time": "<ISO datetime format, IST timezone>"
+        "start_time": "<ISO datetime format in Asia/Kolkata timezone>",
+        "end_time": "<ISO datetime format in Asia/Kolkata timezone>"
     }
-    If no end_time is specified, assume a 30-minute meeting.
-    The datetime must be full ISO format, e.g., "2025-11-12T11:00:00+05:30".
+    - Always produce valid JSON, no text outside curly braces.
+    - If end_time is not mentioned, assume 30 minutes after start_time.
     """
 
-    completion = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": message}
-        ],
-        temperature=0.3
-    )
-
     try:
-        parsed = json.loads(completion.choices[0].message.content.strip())
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": message}
+            ],
+            temperature=0.2,
+            response_format={"type": "json_object"}
+        )
+
+        parsed = json.loads(completion.choices[0].message.content)
         return parsed
+
     except Exception as e:
         print("⚠️ Groq parsing failed:", e)
         return None
