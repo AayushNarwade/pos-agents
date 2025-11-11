@@ -32,21 +32,18 @@ services:
     env: python
     plan: free
     region: singapore
-
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn -w 1 -b 0.0.0.0:$PORT calendar_agent:app
-
+    startCommand: gunicorn -w 1 -b 0.0.0.0:$PORT calendar_agent_public:app
     envVars:
       - key: GROQ_API_KEY
-        sync: false  # You'll add this securely via Render Dashboard
-
-      # Optional (only if your agent directly uses Google Calendar API)
-      - key: GOOGLE_CALENDAR_API_KEY
         sync: false
-
-      # Optional timezone support
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GOOGLE_CALENDAR_ID
+        sync: false
       - key: TZ
         value: "Asia/Kolkata"
+
 
 
 
