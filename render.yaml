@@ -25,25 +25,29 @@ services:
 
 
 
-#calender 
+#calendar agent
 services:
   - type: web
-    name: calendar-agent
+    name: pos-calendar-agent
     env: python
     plan: free
     region: singapore
+
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn -w 1 -b 0.0.0.0:$PORT calendar_agent:app
+
     envVars:
-      - key: GOOGLE_CALENDAR_ID
-        value: "aayushnarwade10@gmail.com"
-      - key: GOOGLE_CREDENTIALS_PATH
-        value: "/etc/secrets/google_service_key.json"
       - key: GROQ_API_KEY
+        sync: false  # You'll add this securely via Render Dashboard
+
+      # Optional (only if your agent directly uses Google Calendar API)
+      - key: GOOGLE_CALENDAR_API_KEY
         sync: false
-    secretFiles:
-      - name: google_service_key.json
-        path: /etc/secrets/google_service_key.json
+
+      # Optional timezone support
+      - key: TZ
+        value: "Asia/Kolkata"
+
 
 
 

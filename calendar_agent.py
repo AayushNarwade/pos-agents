@@ -1,98 +1,74 @@
 from flask import Flask, request, jsonify
 import os, json
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
 import pytz
-from googleapiclient.discovery import build
-from google.oauth2 import service_account
+from dotenv import load_dotenv
 from groq import Groq
+import requests
 
 load_dotenv()
 app = Flask(__name__)
-
-SCOPES = ["https://www.googleapis.com/auth/calendar"]
-GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH", "/etc/secrets/google_service_key.json")
-GOOGLE_CALENDAR_ID = os.getenv("GOOGLE_CALENDAR_ID")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 IST = pytz.timezone("Asia/Kolkata")
 
-service = None
-try:
-    creds = service_account.Credentials.from_service_account_file(GOOGLE_CREDENTIALS_PATH, scopes=SCOPES)
-    service = build("calendar", "v3", credentials=creds)
-    print("✅ Google Calendar Agent authenticated successfully.")
-except Exception as e:
-    print("❌ Google Auth Error:", e)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GOOGLE_CALENDAR_API_KEY = os.getenv("GOOGLE_CALENDAR_API_KEY")  # if using direct API
+GROQ_CLIENT = Groq(api_key=GROQ_API_KEY)
 
-client = Groq(api_key=GROQ_API_KEY)
+SYSTEM_PROMPT = """
+You are the Calendar Agent in the Present Operating System (POS).
+Your job is to extract structured event details from natural language.
+Return only valid JSON with keys: title, start_time, end_time, description.
+Infer missing information when possible.
+"""
 
-def parse_message_with_ai(message):
-    today_str = datetime.now(IST).strftime("%Y-%m-%d (%A)")
-    system_prompt = f"""
-    You are a precise time parser. Today is {today_str}.
-    Output JSON with "title", "start_time", "end_time" in ISO 8601 (Asia/Kolkata).
-    Assume current year if missing. Never pick past dates.
-    """
-    completion = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": message}],
-        temperature=0.3,
-        response_format={"type": "json_object"}
-    )
-    return json.loads(completion.choices[0].message.content)
+def clean_json_output(text):
+    text = text.strip()
+    if text.startswith("```"): text = text.replace("```json", "").replace("```", "").strip()
+    return text
 
 @app.route("/", methods=["GET"])
 def health():
-    return jsonify({"status": "✅ Google Calendar Agent Running"}), 200
+    return jsonify({"status": "✅ AI Calendar Agent Running"}), 200
 
 @app.route("/create_event", methods=["POST"])
 def create_event():
     try:
         data = request.get_json(force=True)
-        if "message" in data and not data.get("start_time"):
-            ai_parsed = parse_message_with_ai(data["message"])
-            data.update(ai_parsed)
+        message = data.get("message", "")
 
-        start_time = data.get("start_time")
-        if not start_time:
-            return jsonify({"error": "start_time is required"}), 400
+        completion = GROQ_CLIENT.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": message},
+            ],
+            temperature=0.3,
+            max_tokens=400,
+        )
 
-        title = data.get("title", "Untitled Event")
-        description = data.get("description", "")
-        end_time = data.get("end_time")
+        raw = completion.choices[0].message.content.strip()
+        cleaned = clean_json_output(raw)
+        event_data = json.loads(cleaned)
 
-        start_dt = datetime.fromisoformat(start_time)
-        if start_dt.tzinfo is None:
-            start_dt = IST.localize(start_dt)
-        if end_time:
-            end_dt = datetime.fromisoformat(end_time)
-            if end_dt.tzinfo is None:
-                end_dt = IST.localize(end_dt)
-        else:
-            end_dt = start_dt + timedelta(minutes=30)
+        # (Optional) Use Google Calendar API to create the event here
+        event_link = f"https://calendar.google.com/event?action=TEMPLATE&text={event_data['title']}"
 
-        event = {
-            "summary": title,
-            "description": description,
-            "start": {"dateTime": start_dt.isoformat(), "timeZone": "Asia/Kolkata"},
-            "end": {"dateTime": end_dt.isoformat(), "timeZone": "Asia/Kolkata"},
+        response = {
+            "calendar_link": event_link,
+            "event_summary": event_data["title"],
+            "start_time": event_data.get("start_time"),
+            "end_time": event_data.get("end_time"),
+            "description": event_data.get("description"),
         }
 
-        created_event = service.events().insert(calendarId=GOOGLE_CALENDAR_ID, body=event).execute()
-        calendar_link = created_event.get("htmlLink")
+        print("📅 Created Event:", response)
+        return jsonify(response), 200
 
-        return jsonify({
-            "status": "✅ Event Created Successfully",
-            "event_title": title,
-            "calendar_link": calendar_link,
-            "start": start_dt.isoformat(),
-            "end": end_dt.isoformat()
-        }), 200
     except Exception as e:
-        print("❌ Error creating event:", e)
+        print("❌ Calendar Agent Error:", e)
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 10002))
-    print(f"🚀 Calendar Agent running on port {port}")
+    print(f"🚀 AI Calendar Agent running locally on port {port}")
     app.run(host="0.0.0.0", port=port)
