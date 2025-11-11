@@ -19,7 +19,6 @@ MAILTRAP_USER = os.getenv("MAILTRAP_USER")
 MAILTRAP_PASS = os.getenv("MAILTRAP_PASS")
 SENDER_EMAIL = os.getenv("SENDER_EMAIL", "pos-agent@mvp.com")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-PORT = int(os.getenv("PORT", 10003))
 
 # Initialize Groq client
 client = Groq(api_key=GROQ_API_KEY)
@@ -67,17 +66,24 @@ def generate_ai_email(context: str) -> dict:
 
 def send_mailtrap_email(to_email: str, subject: str, body: str):
     """
-    Sends email draft to Mailtrap SMTP inbox for testing.
+    Sends the generated email draft to Mailtrap sandbox inbox for testing.
     """
     msg = MIMEText(body, "plain")
     msg["Subject"] = subject
     msg["From"] = SENDER_EMAIL
     msg["To"] = to_email
 
-    with smtplib.SMTP(MAILTRAP_HOST, MAILTRAP_PORT) as server:
-        server.starttls()
-        server.login(MAILTRAP_USER, MAILTRAP_PASS)
-        server.send_message(msg)
+    try:
+        with smtplib.SMTP(MAILTRAP_HOST, MAILTRAP_PORT, timeout=15) as server:
+            server.starttls()
+            server.login(MAILTRAP_USER, MAILTRAP_PASS)
+            server.send_message(msg)
+        print(f"📧 Email successfully sent to Mailtrap for {to_email}")
+        return True
+    except Exception as e:
+        print("❌ SMTP error:", e)
+        traceback.print_exc()
+        raise e
 
 
 # ---------------- Routes ----------------
@@ -92,8 +98,7 @@ def home():
 @app.route("/create_draft", methods=["POST"])
 def create_draft():
     """
-    Create AI Email Draft
-    ---------------------
+    Create AI-generated email draft and send it to Mailtrap.
     Expected JSON body:
     {
         "to": "someone@example.com",
@@ -106,9 +111,7 @@ def create_draft():
         context = data.get("context")
 
         if not recipient or not context:
-            return jsonify({
-                "error": "Missing fields. Required: 'to' and 'context'."
-            }), 400
+            return jsonify({"error": "Missing fields. Required: 'to' and 'context'."}), 400
 
         # 1️⃣ Generate draft using Groq AI
         ai_email = generate_ai_email(context)
@@ -117,11 +120,10 @@ def create_draft():
 
         # 2️⃣ Send draft to Mailtrap
         send_mailtrap_email(recipient, subject, body)
-        print(f"🤖 Draft sent to Mailtrap for {recipient}")
 
-        # 3️⃣ Respond with metadata
+        # 3️⃣ Return metadata response
         return jsonify({
-            "status": "AI Draft Created ✅",
+            "status": "✅ AI Draft Created & Sent to Mailtrap",
             "to": recipient,
             "subject": subject,
             "body_preview": (body[:200] + "...") if len(body) > 200 else body,
@@ -139,5 +141,6 @@ def create_draft():
 
 # ---------------- Entry Point ----------------
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # Render dynamically injects $PORT
+    # Render automatically injects the PORT environment variable
+    port = int(os.environ.get("PORT", 10003))
     app.run(host="0.0.0.0", port=port)
