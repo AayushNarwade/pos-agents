@@ -17,30 +17,35 @@ services:
       - key: XP_AGENT_PORT
         value: "10001"
 
+
+
+
+#calender 
 services:
   - type: web
     name: calendar-agent
     env: python
     plan: free
-    region: oregon
+    region: singapore
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn calendar_agent:app
+    startCommand: gunicorn -w 2 -b 0.0.0.0:$PORT calendar_agent:app
     envVars:
-      - key: PORT
-        value: 10002
       - key: GOOGLE_CALENDAR_ID
-        value: "aayushnarwade10@gmail.com"    # <-- your actual Gmail Calendar ID
+        value: "aayushnarwade10@gmail.com"
       - key: GOOGLE_CREDENTIALS_PATH
         value: "/etc/secrets/google_service_key.json"
       - key: GROQ_API_KEY
-        sync: false                          # Set this securely in Render Dashboard
+        sync: false
     secretFiles:
       - name: google_service_key.json
         path: /etc/secrets/google_service_key.json
 
 
 
-  # ------------------ Email Agent ------------------
+
+
+#email agent
+services:
   - type: web
     name: email-agent
     env: python
