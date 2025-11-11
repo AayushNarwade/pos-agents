@@ -42,12 +42,9 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn -w 2 -b 0.0.0.0:$PORT email_agent:app
     envVars:
-      # API Keys and Tokens
       - key: GROQ_API_KEY
         sync: false
-      - key: MAILTRAP_TOKEN
+      - key: BREVO_API_KEY
         sync: false
-
-      # Email Metadata
       - key: SENDER_EMAIL
         value: pos-agent@mvp.com
