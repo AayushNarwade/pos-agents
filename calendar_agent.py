@@ -36,18 +36,23 @@ client = Groq(api_key=GROQ_API_KEY)
 def parse_message_with_ai(message: str):
     """
     Use Groq LLM to extract title, start_time, and end_time from plain English.
-    Returns structured JSON.
+    Adds current date context to prevent year mismatch.
     """
-    system_prompt = """
-    You are an intelligent event parser that always outputs pure JSON.
-    Given a meeting request in natural language, extract and return only:
-    {
+    today_str = datetime.now(IST).strftime("%Y-%m-%d (%A)")
+    system_prompt = f"""
+    You are a precise meeting time parser.
+    Today's date is {today_str}.
+    Given a meeting request, extract:
+    {{
         "title": "<title>",
-        "start_time": "<ISO datetime format in Asia/Kolkata timezone>",
-        "end_time": "<ISO datetime format in Asia/Kolkata timezone>"
-    }
-    - Always produce valid JSON, no text outside curly braces.
-    - If end_time is not mentioned, assume 30 minutes after start_time.
+        "start_time": "<ISO datetime format, Asia/Kolkata timezone>",
+        "end_time": "<ISO datetime format, Asia/Kolkata timezone>"
+    }}
+    - The year must be 2025 (or current year).
+    - Never output past dates.
+    - If time only is given (like 'tomorrow 4 PM'), assume the next valid occurrence.
+    - Always output valid JSON.
+    - If end_time not given, assume 30 minutes after start_time.
     """
 
     try:
@@ -57,11 +62,20 @@ def parse_message_with_ai(message: str):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": message}
             ],
-            temperature=0.2,
+            temperature=0.3,
             response_format={"type": "json_object"}
         )
-
         parsed = json.loads(completion.choices[0].message.content)
+
+        # --- Safety correction: if AI date < now, push to future ---
+        for key in ["start_time", "end_time"]:
+            if key in parsed:
+                dt = datetime.fromisoformat(parsed[key])
+                if dt < datetime.now(IST):
+                    dt = dt.replace(year=datetime.now(IST).year)
+                    if dt < datetime.now(IST):
+                        dt += timedelta(days=1)
+                    parsed[key] = dt.isoformat()
         return parsed
 
     except Exception as e:
@@ -72,7 +86,7 @@ def parse_message_with_ai(message: str):
 # ----------------- ROUTES -----------------
 @app.route("/", methods=["GET"])
 def health():
-    return jsonify({"status": "Google Calendar Agent Running ✅"}), 200
+    return jsonify({"status": "✅ Google Calendar Agent Running"}), 200
 
 
 @app.route("/create_event", methods=["POST"])
@@ -112,7 +126,14 @@ def create_event():
         else:
             end_dt = start_dt + timedelta(minutes=30)
 
-        # --- Step 3: Create Event ---
+        # --- Step 3: Ensure date is not in past ---
+        now = datetime.now(IST)
+        if start_dt < now:
+            print("⚠️ Adjusting event to next valid day...")
+            start_dt += timedelta(days=1)
+            end_dt += timedelta(days=1)
+
+        # --- Step 4: Create Event ---
         event_body = {
             "summary": title,
             "description": description,
