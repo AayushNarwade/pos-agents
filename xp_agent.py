@@ -4,155 +4,253 @@ import requests
 from datetime import datetime
 from dotenv import load_dotenv
 import pytz
+import json
+import math
 
-# ---------------------- ENV ----------------------
+# Optional Groq client for reasoning
+try:
+    from groq import Groq
+except Exception:
+    Groq = None
+
+# ---------------- Setup ----------------
+app = Flask(__name__)
 load_dotenv()
-NOTION_API_KEY = os.getenv("NOTION_API_KEY")
-TASK_DB_ID = os.getenv("NOTION_TASK_DATABASE_ID")
-XP_LEDGER_DB_ID = os.getenv("NOTION_XP_LEDGER_ID")
-XP_AGENT_PORT = int(os.getenv("XP_AGENT_PORT", 10001))
+IST = pytz.timezone("Asia/Kolkata")
 
-headers = {
+# ---------------- ENV ----------------
+NOTION_API_KEY = os.getenv("NOTION_API_KEY")
+NOTION_TASK_DATABASE_ID = os.getenv("NOTION_TASK_DATABASE_ID")
+NOTION_XP_LEDGER_ID = os.getenv("NOTION_XP_LEDGER_ID")  # optional
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+PORT = int(os.getenv("PORT", 10003))
+NOTION_BASE = "https://api.notion.com/v1"
+
+HEADERS = {
     "Authorization": f"Bearer {NOTION_API_KEY}",
     "Notion-Version": "2022-06-28",
-    "Content-Type": "application/json",
+    "Content-Type": "application/json"
 }
 
-# ---------------------- APP ----------------------
-app = Flask(__name__)
+groq_client = Groq(api_key=GROQ_API_KEY) if (GROQ_API_KEY and Groq is not None) else None
 
-# ---------------------- HELPER: Calculate XP ----------------------
-def calculate_dynamic_xp(task_name: str, due_date: str | None):
-    """
-    Dynamically calculates XP based on urgency and task difficulty.
-    (Later this will also use WHOOP recovery + strain data)
-    """
-    base_xp = 10
 
-    # Add urgency bonus
-    if due_date:
-        try:
-            due = datetime.fromisoformat(due_date.replace("Z", "+00:00"))
-            now = datetime.now(pytz.UTC)
-            hours_left = (due - now).total_seconds() / 3600
-            if hours_left < 6:
-                base_xp += 20  # very urgent
-            elif hours_left < 24:
-                base_xp += 10  # moderately urgent
-        except Exception:
-            pass
-
-    # Add complexity bonus based on task keywords
-    if any(keyword in task_name.lower() for keyword in ["report", "presentation", "analysis", "summary"]):
-        base_xp += 15
-    elif any(keyword in task_name.lower() for keyword in ["email", "call", "reminder"]):
-        base_xp += 5
-
-    return base_xp
-
-# ---------------------- WHOOP PLACEHOLDERS ----------------------
-def get_whoop_recovery():
-    """Mock WHOOP recovery value (0–100)."""
-    return 85
-
-def adjust_xp_with_whoop(xp):
-    """Adjust XP dynamically based on WHOOP recovery."""
-    recovery = get_whoop_recovery()
-    if recovery < 40:
-        xp *= 0.8
-    elif recovery > 80:
-        xp *= 1.1
-    return round(xp)
-
-# ---------------------- HELPER: Find Task ID ----------------------
-def get_task_page_id(task_name):
-    """
-    Search for a task in the Task Database by its name.
-    Returns the page ID if found, else None.
-    """
-    url = f"https://api.notion.com/v1/databases/{TASK_DB_ID}/query"
-    query = {
+# ---------------- Helpers ----------------
+def notion_query_open_tasks():
+    """Fetch tasks in 'To Do' or 'In Progress' status."""
+    url = f"{NOTION_BASE}/databases/{NOTION_TASK_DATABASE_ID}/query"
+    body = {
         "filter": {
-            "property": "Task",
-            "title": {"equals": task_name}
+            "or": [
+                {"property": "Status", "select": {"equals": "To Do"}},
+                {"property": "Status", "select": {"equals": "In Progress"}}
+            ]
         }
     }
-    response = requests.post(url, headers=headers, json=query)
-    if response.status_code == 200:
-        results = response.json().get("results", [])
-        if results:
-            return results[0]["id"]
-    print("⚠️ Task not found in Task Database:", task_name)
-    return None
+    r = requests.post(url, headers=HEADERS, json=body, timeout=15)
+    r.raise_for_status()
+    return r.json().get("results", [])
 
-# ---------------------- HELPER: Add XP Record ----------------------
-def add_xp_to_ledger(task_name, avatar, xp_points, reason):
-    """
-    Adds a new XP record in the XP Ledger database in Notion.
-    Links to the Task Database using relation.
-    """
-    url = "https://api.notion.com/v1/pages"
-    timestamp = datetime.now(pytz.UTC).isoformat()
 
-    task_id = get_task_page_id(task_name)
+def extract_task_summary(page):
+    """Extract summary info from a Notion page."""
+    props = page.get("properties", {})
+    task = props.get("Task", {}).get("title", [])
+    title = "".join([t.get("plain_text", "") for t in task]).strip()
 
-    # Build XP Ledger entry
-    body = {
-        "parent": {"database_id": XP_LEDGER_DB_ID},
-        "properties": {
-            "XP Entry": {"title": [{"text": {"content": f"XP for {task_name}"}}]},
-            "Avatar": {"select": {"name": avatar}},
-            "XP Awarded": {"number": xp_points},
-            "Reason": {"rich_text": [{"text": {"content": reason}}]},
-            "Timestamp": {"date": {"start": timestamp}},
-        },
+    context = ""
+    if "Context" in props:
+        rt = props["Context"].get("rich_text", [])
+        context = "".join([t.get("plain_text", "") for t in rt]).strip()
+
+    due_date = None
+    if "Due Date" in props and props["Due Date"].get("date"):
+        dd = props["Due Date"]["date"].get("start")
+        if dd:
+            try:
+                due_date = datetime.fromisoformat(dd)
+            except Exception:
+                pass
+
+    xp = props.get("XP", {}).get("number")
+    return {
+        "id": page["id"],
+        "title": title,
+        "context": context,
+        "due_date": due_date,
+        "xp": xp
     }
 
-    # If task relation exists, attach it
-    if task_id:
-        body["properties"]["Task"] = {"relation": [{"id": task_id}]}
 
-    r = requests.post(url, headers=headers, json=body)
-    if r.status_code not in [200, 201]:
-        print("❌ Failed to add XP to ledger:", r.text)
-    else:
-        print(f"✅ XP entry created for {task_name} ({xp_points} XP)")
-    return r.status_code
+def compute_xp_from_due(due_date):
+    """Compute XP reward based on timing difference."""
+    base_xp = 15
+    now = datetime.now(IST)
 
-# ---------------------- ROUTES ----------------------
+    if not due_date:
+        return base_xp
+
+    if due_date.tzinfo is None:
+        due_date = IST.localize(due_date)
+    delta_hours = (due_date - now).total_seconds() / 3600.0
+
+    if delta_hours > 0:  # Early
+        bonus = min(5, int(delta_hours // 24))
+        xp = base_xp + bonus
+    else:  # Late
+        days_late = math.floor(abs(delta_hours) / 24)
+        penalty = days_late * 3
+        xp = max(2, base_xp - penalty)
+
+    return int(min(max(1, xp), 50))
+
+
+def patch_notion_task(page_id, xp):
+    """Update XP and mark task as Completed."""
+    url = f"{NOTION_BASE}/pages/{page_id}"
+    body = {
+        "properties": {
+            "XP": {"number": xp},
+            "Status": {"select": {"name": "Completed"}}
+        }
+    }
+    r = requests.patch(url, headers=HEADERS, json=body, timeout=15)
+    r.raise_for_status()
+    return r.json()
+
+
+def groq_match_task(message, candidates):
+    """Use Groq reasoning or heuristic to find best task match."""
+    if not candidates:
+        return None
+
+    candidate_text = "\n".join(
+        [f"{i+1}. {c['title']} | context: {c['context'] or 'none'}" for i, c in enumerate(candidates)]
+    )
+
+    prompt = f"""
+    You are an intelligent task matcher.
+    Choose which of the following tasks best matches the user's completion message.
+    Return ONLY valid JSON:
+    {{"index": <1-based index>, "reason": "<short reason>"}}
+
+    Tasks:
+    {candidate_text}
+
+    Message: "{message}"
+    """
+
+    if groq_client:
+        try:
+            completion = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "system", "content": prompt}],
+                temperature=0.0,
+                max_tokens=256,
+            )
+            raw = completion.choices[0].message.content.strip()
+            if raw.startswith("```"):
+                raw = raw.strip("`")
+            raw_json = raw[raw.find("{"):raw.rfind("}")+1]
+            data = json.loads(raw_json)
+            idx = int(data.get("index", 0)) - 1
+            if 0 <= idx < len(candidates):
+                return {"task": candidates[idx], "reason": data.get("reason", "")}
+        except Exception as e:
+            print("⚠️ Groq error:", e)
+
+    # fallback heuristic
+    msg = message.lower()
+    best = None
+    for c in candidates:
+        score = 0
+        if c["title"] and c["title"].lower() in msg:
+            score += 10
+        if c["context"] and any(w.lower() in msg for w in c["context"].split()):
+            score += 3
+        if score > 0 and (best is None or score > best[0]):
+            best = (score, c)
+    if best:
+        return {"task": best[1], "reason": "Heuristic match"}
+    return None
+
+
+def log_to_ledger(action_name, xp, source):
+    """Optional XP ledger logging."""
+    if not NOTION_XP_LEDGER_ID:
+        return None
+    try:
+        payload = {
+            "parent": {"database_id": NOTION_XP_LEDGER_ID},
+            "properties": {
+                "Action": {"title": [{"text": {"content": action_name}}]},
+                "XP Earned": {"number": xp},
+                "Source": {"rich_text": [{"text": {"content": source}}]},
+                "Timestamp": {"date": {"start": datetime.now(IST).isoformat()}}
+            }
+        }
+        resp = requests.post(f"{NOTION_BASE}/pages", headers=HEADERS, json=payload, timeout=10)
+        if resp.status_code in [200, 201]:
+            print(f"🪙 Logged {xp} XP for '{action_name}'")
+            return True
+    except Exception as e:
+        print("⚠️ Ledger logging failed:", e)
+    return False
+
+
+# ---------------- Routes ----------------
 @app.route("/", methods=["GET"])
-def home():
-    return jsonify({
-        "status": "XP Agent running ✅",
-        "version": "1.2",
-        "endpoints": ["/award_xp"]
-    }), 200
+def health():
+    return jsonify({"status": "✅ XP Agent v5 Running (Reasoning-Only Mode)"}), 200
+
 
 @app.route("/award_xp", methods=["POST"])
 def award_xp():
     try:
         data = request.get_json(force=True)
-    except Exception:
-        return jsonify({"error": "Invalid JSON body"}), 400
+        message = data.get("message", "").strip()
+        source = data.get("source", "Parent Agent")
 
-    task_name = data.get("task_name", "Untitled Task")
-    avatar = data.get("avatar", "Producer")
-    due_date = data.get("due_date")
-    reason = data.get("reason", "Task Completed")
+        if not message:
+            return jsonify({"error": "Missing 'message'"}), 400
 
-    xp_points = calculate_dynamic_xp(task_name, due_date)
-    xp_points = adjust_xp_with_whoop(xp_points)
-    status = add_xp_to_ledger(task_name, avatar, xp_points, reason)
+        pages = notion_query_open_tasks()
+        tasks = [extract_task_summary(p) for p in pages]
+        if not tasks:
+            return jsonify({"status": "no_open_tasks"}), 200
 
-    return jsonify({
-        "task": task_name,
-        "xp_awarded": xp_points,
-        "reason": reason,
-        "whoop_adjusted": True,
-        "status": "XP logged" if status in [200, 201] else "Error logging XP"
-    }), 200 if status in [200, 201] else 500
+        print("🔍 Matching against open tasks:")
+        for t in tasks:
+            print(f"• {t['title']} (context: {t['context']})")
 
-# ---------------------- MAIN ----------------------
+        match = groq_match_task(message, tasks)
+        if not match:
+            return jsonify({"status": "no_match", "message": "No matching task found"}), 200
+
+        matched_task = match["task"]
+        reason = match["reason"]
+        xp = compute_xp_from_due(matched_task["due_date"])
+        patch_resp = patch_notion_task(matched_task["id"], xp)
+        log_to_ledger(matched_task["title"], xp, source)
+
+        return jsonify({
+            "status": "✅ XP Awarded",
+            "matched_task": matched_task["title"],
+            "reason": reason,
+            "xp": xp,
+            "notion_id": matched_task["id"],
+            "notion_update": patch_resp
+        }), 200
+
+    except Exception as e:
+        print("❌ Error:", e)
+        return jsonify({"error": str(e)}), 500
+
+
+# ---------------- Main ----------------
 if __name__ == "__main__":
-    print(f"🚀 XP Agent running on port {XP_AGENT_PORT}")
-    app.run(host="0.0.0.0", port=XP_AGENT_PORT)
+    port = int(os.getenv("PORT", 10003))  # Render injects PORT dynamically
+    print(f"🚀 XP Agent v5 running on port {port}")
+    app.run(host="0.0.0.0", port=port)
+
