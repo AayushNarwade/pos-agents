@@ -28,21 +28,28 @@ services:
 #calendar agent
 services:
   - type: web
-    name: pos-calendar-agent
+    name: calendar_agent
     env: python
     plan: free
     region: singapore
+
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn -w 1 -b 0.0.0.0:$PORT calendar_agent_public:app
+    startCommand: gunicorn -w 1 -b 0.0.0.0:$PORT calendar_agent:app
+
     envVars:
-      - key: GROQ_API_KEY
-        sync: false
       - key: GOOGLE_API_KEY
         sync: false
       - key: GOOGLE_CALENDAR_ID
         sync: false
-      - key: TZ
-        value: "Asia/Kolkata"
+      - key: GOOGLE_CREDENTIALS_PATH
+        value: "/etc/secrets/google_service_key.json"
+      - key: GROQ_API_KEY
+        sync: false
+
+    secretFiles:
+      - name: google_service_key.json
+        path: /etc/secrets/google_service_key.json
+
 
 
 
