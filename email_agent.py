@@ -19,24 +19,45 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 client = Groq(api_key=GROQ_API_KEY)
 
 
-# ---------------- Utility: Clean AI JSON ----------------
-def extract_json(text: str):
-    """Extract JSON object from model text (handles markdown fences, codeblocks, etc)."""
-    try:
-        match = re.search(r"\{[\s\S]*\}", text)
-        if match:
-            json_str = match.group(0)
-            return json.loads(json_str)
-    except Exception:
-        pass
-    return {"subject": "Follow-up Email", "body": text.strip()}
+# ---------------- Utility: Safe JSON Parser ----------------
+def safe_parse_json(raw_text: str):
+    """
+    Ensures the model output is parsed as valid JSON, even if double-encoded or wrapped in markdown/code fences.
+    """
+    if not raw_text:
+        return {}
+
+    # Clean up markdown or code fences
+    cleaned = re.sub(r"^```(?:json)?", "", raw_text.strip(), flags=re.IGNORECASE)
+    cleaned = re.sub(r"```$", "", cleaned.strip())
+
+    # Extract JSON-like content
+    match = re.search(r"\{[\s\S]*\}", cleaned)
+    if not match:
+        return {"body": cleaned}
+
+    json_candidate = match.group(0)
+
+    # Try decoding multiple times in case of nested stringified JSON
+    for _ in range(2):
+        try:
+            parsed = json.loads(json_candidate)
+            if isinstance(parsed, str):
+                json_candidate = parsed
+                continue
+            return parsed
+        except Exception:
+            pass
+
+    # Fallback: return plain text if decoding fails
+    return {"body": cleaned}
 
 
 # ---------------- Utility: Extract Recipient ----------------
 def extract_recipient(context: str):
     """
-    Attempts to extract an email address from the input text.
-    Example: "Send a mail to john@example.com to ask for the update"
+    Extracts email address from user text.
+    Example: "Send a mail to john@example.com about project update"
     """
     match = re.search(r"[\w\.-]+@[\w\.-]+\.\w+", context)
     if match:
@@ -47,19 +68,18 @@ def extract_recipient(context: str):
 # ---------------- Utility: AI Email Draft ----------------
 def generate_ai_email(context: str) -> dict:
     """
-    Uses Groq LLM to generate a professional, human-like email.
-    Returns: {"subject": str, "body": str}
+    Generates a professional, polite, and structured email using Groq LLM.
     """
     system_prompt = """
     You are a professional email writing assistant.
     Craft a complete, well-structured email based on the given context.
     Follow these rules strictly:
-    - Write in a clear, polite, business tone.
-    - Start with a greeting (e.g., 'Hi <Name>,' or 'Hello Team,').
-    - Include 2–3 medium sized paragraphs.
-    - End with a closing (e.g., 'Best regards,' or 'Thank you,').
-    - Make the subject short and professional.
-    - Do NOT return explanations or markdown.
+    - Use a polite, natural, and professional business tone.
+    - Begin with a greeting (e.g., 'Hi <Name>,' or 'Hello Team,').
+    - Write 2–3 concise, well-formed paragraphs.
+    - End with a polite closing (e.g., 'Best regards,' or 'Thank you,').
+    - The subject should be clear and concise.
+    - Do NOT include markdown, explanations, or backticks.
     - Output ONLY valid JSON in this format:
       {
         "subject": "<email subject>",
@@ -78,13 +98,19 @@ def generate_ai_email(context: str) -> dict:
     )
 
     ai_text = completion.choices[0].message.content.strip()
-    return extract_json(ai_text)
+    parsed = safe_parse_json(ai_text)
+
+    # Fallbacks for robustness
+    if not parsed.get("subject") or not parsed.get("body"):
+        parsed = {"subject": "Automated Email", "body": ai_text}
+
+    return parsed
 
 
 # ---------------- Utility: Send Email via Brevo ----------------
 def send_brevo_email(to_email: str, subject: str, body: str):
     """
-    Sends an email using Brevo's transactional API.
+    Sends a formatted professional email using Brevo's transactional API.
     """
     url = "https://api.brevo.com/v3/smtp/email"
     headers = {
@@ -93,14 +119,17 @@ def send_brevo_email(to_email: str, subject: str, body: str):
         "content-type": "application/json"
     }
 
-    # Clean HTML layout
+    # Well-styled HTML body
     html_body = f"""
     <html>
     <body style="font-family: 'Segoe UI', sans-serif; color: #333; line-height: 1.6;">
         {body.replace('\n', '<br>')}
         <br><br>
-        <p style="margin-top: 20px;">Best regards,<br><strong>POS AI Agent</strong><br>
-        <span style="font-size: 12px; color: #888;">Automated Communication Assistant</span></p>
+        <p style="margin-top: 20px;">
+            Best regards,<br>
+            <strong>POS AI Agent</strong><br>
+            <span style="font-size: 12px; color: #888;">Automated Communication Assistant</span>
+        </p>
     </body>
     </html>
     """
@@ -131,23 +160,24 @@ def home():
 def create_draft():
     """
     Create an AI-generated professional email and send it via Brevo.
+    Automatically detects the recipient from input or request body.
     """
     try:
         data = request.get_json(force=True)
         user_input = data.get("context", "")
         explicit_recipient = data.get("to")
 
-        # Try to extract email address from message if not given explicitly
+        # Detect recipient dynamically
         recipient = explicit_recipient or extract_recipient(user_input)
         if not recipient:
             return jsonify({"error": "No valid recipient found in the message."}), 400
 
-        # Remove email from the context so it doesn’t confuse the LLM
+        # Sanitize input (remove email addresses before sending to AI)
         sanitized_context = re.sub(r"[\w\.-]+@[\w\.-]+\.\w+", "", user_input)
 
         ai_email = generate_ai_email(sanitized_context)
-        subject = ai_email.get("subject", "AI Generated Email")
-        body = ai_email.get("body", "Hello,\n\nThis is an AI-generated message.\n\nBest,\nPOS Agent")
+        subject = ai_email.get("subject", "AI Generated Email").strip()
+        body = ai_email.get("body", "Hello,\n\nThis is an AI-generated message.\n\nBest,\nPOS Agent").strip()
 
         brevo_response = send_brevo_email(recipient, subject, body)
 
@@ -170,6 +200,6 @@ def create_draft():
 
 # ---------------- Main ----------------
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10003))  # ✅ Dynamic for Render
+    port = int(os.getenv("PORT", 10003))  # ✅ Dynamic port for Render
     print(f"🚀 Email Agent running on port {port}")
     app.run(host="0.0.0.0", port=port)
