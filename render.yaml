@@ -57,23 +57,33 @@ services:
 
 
 
-
 #email agent
 services:
   - type: web
-    name: email-agent
+    name: email-agent-x7n0
     env: python
     plan: free
     region: singapore
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn -w 2 -b 0.0.0.0:$PORT email_agent:app
+
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+
+    startCommand: gunicorn -w 1 -b 0.0.0.0:$PORT email_agent:app
+
     envVars:
-      - key: GROQ_API_KEY
-        sync: false
       - key: BREVO_API_KEY
         sync: false
       - key: SENDER_EMAIL
-        value: pos-agent@mvp.com
+        value: "aayushnarwade10@gmail.com"
+      - key: GROQ_API_KEY
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.10
+
+    healthCheckPath: /
+    autoDeploy: true
+
 
 
 
