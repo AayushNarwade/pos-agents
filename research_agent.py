@@ -125,12 +125,13 @@ Respond ONLY in JSON format:
 
     return clean_json_response(completion.choices[0].message.content)
 
+
 # ---------------------
 # Flask Routes
 # ---------------------
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({"status": "Research Agent (Gemini + Groq Hybrid, Clean JSON) active"})
+    return jsonify({"status": "✅ Research Agent (Gemini + Groq Hybrid, Clean JSON) active"})
 
 
 @app.route("/research", methods=["POST"])
@@ -166,5 +167,10 @@ def research():
             }), 500
 
 
+# ---------------------
+# ENTRY POINT
+# ---------------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5002, debug=True)
+    port = int(os.getenv("PORT", 5002))  # ✅ Dynamic port for Render
+    print(f"🚀 Research Agent running on port {port}")
+    app.run(host="0.0.0.0", port=port)
