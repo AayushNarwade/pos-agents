@@ -4,6 +4,7 @@ import requests
 from dotenv import load_dotenv
 from groq import Groq
 import json
+import re
 import traceback
 
 # ---------------- Load Environment ----------------
@@ -17,30 +18,40 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 client = Groq(api_key=GROQ_API_KEY)
 
+# ---------------- Utility: Clean AI JSON ----------------
+def extract_json(text: str):
+    """Extract JSON object from model text (handles markdown fences, codeblocks, etc)."""
+    try:
+        match = re.search(r"\{[\s\S]*\}", text)
+        if match:
+            json_str = match.group(0)
+            return json.loads(json_str)
+    except Exception:
+        pass
+    return {"subject": "Follow-up Email", "body": text.strip()}
+
+
 # ---------------- Utility: AI Email Draft ----------------
 def generate_ai_email(context: str) -> dict:
     """
-    Uses Groq LLM to generate a professional, well-structured email.
+    Uses Groq LLM to generate a professional, human-like email.
     Returns: {"subject": str, "body": str}
     """
     system_prompt = """
-    You are a professional corporate email assistant.
-    Write clear, concise, and contextually appropriate business emails.
-    Follow these strict guidelines:
-
-    - Use a polite and confident tone.
-    - Include a proper greeting and closing.
-    - Make sure the subject is short, descriptive, and relevant.
-    - The email body should have 2–4 short paragraphs (60–120 words total).
-    - Always thank the recipient or acknowledge their role.
-    - Avoid robotic phrasing like “Dear Marketing Team,” if not needed; adapt based on context.
-    - Never add signatures; the sender name will be added automatically by the system.
-
-    Return ONLY valid JSON in this exact format:
-    {
+    You are a professional email writing assistant.
+    Craft a complete, well-structured email based on the given context.
+    Follow these rules strictly:
+    - Write in a clear, polite, business tone.
+    - Start with a greeting (e.g., 'Hi <Name>,' or 'Hello Team,').
+    - Include 2–3 short paragraphs.
+    - End with a closing (e.g., 'Best regards,' or 'Thank you,').
+    - Make the subject short and professional.
+    - Do NOT return extra explanations or markdown.
+    - Output ONLY valid JSON in this exact format:
+      {
         "subject": "<email subject>",
         "body": "<email body>"
-    }
+      }
     """
 
     completion = client.chat.completions.create(
@@ -53,17 +64,10 @@ def generate_ai_email(context: str) -> dict:
         max_tokens=500,
     )
 
-    # --- Parse AI response safely ---
-    try:
-        ai_response = completion.choices[0].message.content.strip()
-        ai_email = json.loads(ai_response)
-        return ai_email
-    except Exception:
-        # fallback if model returns raw text
-        return {
-            "subject": "Follow-up on Recent Task",
-            "body": ai_response,
-        }
+    ai_text = completion.choices[0].message.content.strip()
+    ai_email = extract_json(ai_text)
+    return ai_email
+
 
 # ---------------- Utility: Send Email via Brevo ----------------
 def send_brevo_email(to_email: str, subject: str, body: str):
@@ -77,12 +81,12 @@ def send_brevo_email(to_email: str, subject: str, body: str):
         "content-type": "application/json"
     }
 
-    # Create a formatted HTML email for professional appearance
+    # Nicely formatted HTML email
     html_body = f"""
     <html>
-    <body style="font-family: Arial, sans-serif; color: #333;">
-        <p>{body.replace('\n', '<br>')}</p>
-        <br>
+    <body style="font-family: Arial, sans-serif; color: #222;">
+        {body.replace('\n', '<br>')}
+        <br><br>
         <p>Best regards,<br><strong>POS AI Agent</strong></p>
     </body>
     </html>
@@ -100,12 +104,13 @@ def send_brevo_email(to_email: str, subject: str, body: str):
     response.raise_for_status()
     return response.json()
 
+
 # ---------------- Routes ----------------
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({
-        "status": "✅ AI Email Agent Running (Enhanced)",
-        "endpoints": ["/create_draft (POST)"]
+        "status": "✅ Enhanced AI Email Agent Active",
+        "endpoint": "/create_draft (POST)"
     }), 200
 
 
@@ -123,12 +128,13 @@ def create_draft():
             return jsonify({"error": "Missing 'to' or 'context'."}), 400
 
         ai_email = generate_ai_email(context)
-        subject, body = ai_email["subject"], ai_email["body"]
+        subject = ai_email.get("subject", "AI Generated Email")
+        body = ai_email.get("body", "Hello,\n\nThis is an AI-generated message.\n\nBest,\nPOS Agent")
 
         brevo_response = send_brevo_email(recipient, subject, body)
 
         return jsonify({
-            "status": "✅ Professional Email Draft Created & Sent",
+            "status": "✅ Email Draft Created & Sent",
             "to": recipient,
             "subject": subject,
             "body_preview": body[:200],
@@ -146,6 +152,6 @@ def create_draft():
 
 # ---------------- Main ----------------
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10003))  # ✅ Dynamic port for Render
+    port = int(os.getenv("PORT", 10003))  # ✅ Dynamic for Render
     print(f"🚀 Email Agent running on port {port}")
     app.run(host="0.0.0.0", port=port)
