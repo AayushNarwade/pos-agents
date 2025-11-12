@@ -20,16 +20,26 @@ client = Groq(api_key=GROQ_API_KEY)
 # ---------------- Utility: AI Email Draft ----------------
 def generate_ai_email(context: str) -> dict:
     """
-    Uses Groq LLM to generate email subject & body based on context.
+    Uses Groq LLM to generate a professional, well-structured email.
     Returns: {"subject": str, "body": str}
     """
     system_prompt = """
-    You are a helpful email writing assistant.
-    Compose a short, polite, and professional email based on the provided context.
-    Maintain a natural tone and output ONLY valid JSON:
+    You are a professional corporate email assistant.
+    Write clear, concise, and contextually appropriate business emails.
+    Follow these strict guidelines:
+
+    - Use a polite and confident tone.
+    - Include a proper greeting and closing.
+    - Make sure the subject is short, descriptive, and relevant.
+    - The email body should have 2–4 short paragraphs (60–120 words total).
+    - Always thank the recipient or acknowledge their role.
+    - Avoid robotic phrasing like “Dear Marketing Team,” if not needed; adapt based on context.
+    - Never add signatures; the sender name will be added automatically by the system.
+
+    Return ONLY valid JSON in this exact format:
     {
-        "subject": "<subject>",
-        "body": "<body>"
+        "subject": "<email subject>",
+        "body": "<email body>"
     }
     """
 
@@ -39,17 +49,20 @@ def generate_ai_email(context: str) -> dict:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": context},
         ],
-        temperature=0.6,
-        max_tokens=400,
+        temperature=0.65,
+        max_tokens=500,
     )
 
+    # --- Parse AI response safely ---
     try:
-        ai_email = json.loads(completion.choices[0].message.content.strip())
+        ai_response = completion.choices[0].message.content.strip()
+        ai_email = json.loads(ai_response)
         return ai_email
-    except json.JSONDecodeError:
+    except Exception:
+        # fallback if model returns raw text
         return {
-            "subject": "AI Draft Email",
-            "body": completion.choices[0].message.content.strip(),
+            "subject": "Follow-up on Recent Task",
+            "body": ai_response,
         }
 
 # ---------------- Utility: Send Email via Brevo ----------------
@@ -63,11 +76,24 @@ def send_brevo_email(to_email: str, subject: str, body: str):
         "api-key": BREVO_API_KEY,
         "content-type": "application/json"
     }
+
+    # Create a formatted HTML email for professional appearance
+    html_body = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; color: #333;">
+        <p>{body.replace('\n', '<br>')}</p>
+        <br>
+        <p>Best regards,<br><strong>POS AI Agent</strong></p>
+    </body>
+    </html>
+    """
+
     payload = {
         "sender": {"name": "POS AI Agent", "email": SENDER_EMAIL},
         "to": [{"email": to_email}],
         "subject": subject,
-        "textContent": body
+        "htmlContent": html_body,
+        "textContent": body,
     }
 
     response = requests.post(url, headers=headers, json=payload, timeout=15)
@@ -78,7 +104,7 @@ def send_brevo_email(to_email: str, subject: str, body: str):
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({
-        "status": "✅ AI Email Agent Running (Brevo)",
+        "status": "✅ AI Email Agent Running (Enhanced)",
         "endpoints": ["/create_draft (POST)"]
     }), 200
 
@@ -86,7 +112,7 @@ def home():
 @app.route("/create_draft", methods=["POST"])
 def create_draft():
     """
-    Create an AI-generated email draft and send it via Brevo.
+    Create an AI-generated professional email and send it via Brevo.
     """
     try:
         data = request.get_json(force=True)
@@ -102,7 +128,7 @@ def create_draft():
         brevo_response = send_brevo_email(recipient, subject, body)
 
         return jsonify({
-            "status": "✅ AI Draft Created & Sent via Brevo",
+            "status": "✅ Professional Email Draft Created & Sent",
             "to": recipient,
             "subject": subject,
             "body_preview": body[:200],
@@ -118,7 +144,8 @@ def create_draft():
         }), 500
 
 
+# ---------------- Main ----------------
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10003))  # Dynamic port for Render
+    port = int(os.getenv("PORT", 10003))  # ✅ Dynamic port for Render
     print(f"🚀 Email Agent running on port {port}")
     app.run(host="0.0.0.0", port=port)
