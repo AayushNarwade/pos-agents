@@ -159,6 +159,6 @@ def create_event():
 
 # ----------------- MAIN -----------------
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10002))
-    print(f"🚀 Calendar Agent running on port {port}")
+    port = int(os.getenv("PORT", 10000))
+    print(f"🚀 Running on port {port}")
     app.run(host="0.0.0.0", port=port)

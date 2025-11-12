@@ -171,6 +171,6 @@ def research():
 # ENTRY POINT
 # ---------------------
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5002))  # ✅ Dynamic port for Render
-    print(f"🚀 Research Agent running on port {port}")
+    port = int(os.getenv("PORT", 10000))
+    print(f"🚀 Running on port {port}")
     app.run(host="0.0.0.0", port=port)
