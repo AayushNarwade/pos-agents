@@ -18,6 +18,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 client = Groq(api_key=GROQ_API_KEY)
 
+
 # ---------------- Utility: Clean AI JSON ----------------
 def extract_json(text: str):
     """Extract JSON object from model text (handles markdown fences, codeblocks, etc)."""
@@ -29,6 +30,18 @@ def extract_json(text: str):
     except Exception:
         pass
     return {"subject": "Follow-up Email", "body": text.strip()}
+
+
+# ---------------- Utility: Extract Recipient ----------------
+def extract_recipient(context: str):
+    """
+    Attempts to extract an email address from the input text.
+    Example: "Send a mail to john@example.com to ask for the update"
+    """
+    match = re.search(r"[\w\.-]+@[\w\.-]+\.\w+", context)
+    if match:
+        return match.group(0)
+    return None
 
 
 # ---------------- Utility: AI Email Draft ----------------
@@ -43,11 +56,11 @@ def generate_ai_email(context: str) -> dict:
     Follow these rules strictly:
     - Write in a clear, polite, business tone.
     - Start with a greeting (e.g., 'Hi <Name>,' or 'Hello Team,').
-    - Include 2–3 short paragraphs.
+    - Include 2–3 medium sized paragraphs.
     - End with a closing (e.g., 'Best regards,' or 'Thank you,').
     - Make the subject short and professional.
-    - Do NOT return extra explanations or markdown.
-    - Output ONLY valid JSON in this exact format:
+    - Do NOT return explanations or markdown.
+    - Output ONLY valid JSON in this format:
       {
         "subject": "<email subject>",
         "body": "<email body>"
@@ -60,13 +73,12 @@ def generate_ai_email(context: str) -> dict:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": context},
         ],
-        temperature=0.65,
+        temperature=0.6,
         max_tokens=500,
     )
 
     ai_text = completion.choices[0].message.content.strip()
-    ai_email = extract_json(ai_text)
-    return ai_email
+    return extract_json(ai_text)
 
 
 # ---------------- Utility: Send Email via Brevo ----------------
@@ -81,13 +93,14 @@ def send_brevo_email(to_email: str, subject: str, body: str):
         "content-type": "application/json"
     }
 
-    # Nicely formatted HTML email
+    # Clean HTML layout
     html_body = f"""
     <html>
-    <body style="font-family: Arial, sans-serif; color: #222;">
+    <body style="font-family: 'Segoe UI', sans-serif; color: #333; line-height: 1.6;">
         {body.replace('\n', '<br>')}
         <br><br>
-        <p>Best regards,<br><strong>POS AI Agent</strong></p>
+        <p style="margin-top: 20px;">Best regards,<br><strong>POS AI Agent</strong><br>
+        <span style="font-size: 12px; color: #888;">Automated Communication Assistant</span></p>
     </body>
     </html>
     """
@@ -100,7 +113,7 @@ def send_brevo_email(to_email: str, subject: str, body: str):
         "textContent": body,
     }
 
-    response = requests.post(url, headers=headers, json=payload, timeout=15)
+    response = requests.post(url, headers=headers, json=payload, timeout=20)
     response.raise_for_status()
     return response.json()
 
@@ -121,13 +134,18 @@ def create_draft():
     """
     try:
         data = request.get_json(force=True)
-        recipient = data.get("to")
-        context = data.get("context")
+        user_input = data.get("context", "")
+        explicit_recipient = data.get("to")
 
-        if not recipient or not context:
-            return jsonify({"error": "Missing 'to' or 'context'."}), 400
+        # Try to extract email address from message if not given explicitly
+        recipient = explicit_recipient or extract_recipient(user_input)
+        if not recipient:
+            return jsonify({"error": "No valid recipient found in the message."}), 400
 
-        ai_email = generate_ai_email(context)
+        # Remove email from the context so it doesn’t confuse the LLM
+        sanitized_context = re.sub(r"[\w\.-]+@[\w\.-]+\.\w+", "", user_input)
+
+        ai_email = generate_ai_email(sanitized_context)
         subject = ai_email.get("subject", "AI Generated Email")
         body = ai_email.get("body", "Hello,\n\nThis is an AI-generated message.\n\nBest,\nPOS Agent")
 
