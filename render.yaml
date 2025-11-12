@@ -74,3 +74,27 @@ services:
         sync: false
       - key: SENDER_EMAIL
         value: pos-agent@mvp.com
+
+
+
+
+
+#research agent
+services:
+  - type: web
+    name: research-agent
+    env: python
+    plan: free
+    region: singapore
+
+    buildCommand: |
+      pip install -r requirements.txt
+
+    startCommand: gunicorn -w 1 -b 0.0.0.0:$PORT research_agent:app
+
+    envVars:
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+
